@@ -21,7 +21,7 @@
 
 #import "MTStatusBarOverlay.h"
 #import <QuartzCore/QuartzCore.h>
-
+#import "RotatingTabBarController.h"
 
 ////////////////////////////////////////////////////////////////////////
 #pragma mark -
@@ -57,6 +57,10 @@ MAX([UIApplication sharedApplication].statusBarFrame.size.width, [UIApplication 
 #pragma mark -
 #pragma mark Customization
 ////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////
+// StatusBarBackgroundImageView color
+///////////////////////////////////////////////////////
+#define kStatusBarBackgroundImageViewBackgroundColor              [UIColor colorWithRed:256.f/256.f green:0.f blue:0.f alpha:1.0f];
 
 ///////////////////////////////////////////////////////
 // Light Theme (for UIStatusBarStyleDefault)
@@ -78,9 +82,9 @@ MAX([UIApplication sharedApplication].statusBarFrame.size.width, [UIApplication 
 // Dark Theme (for UIStatusBarStyleBlackOpaque)
 ///////////////////////////////////////////////////////
 
-#define kDarkThemeTextColor							[UIColor colorWithRed:0.749f green:0.749f blue:0.749f alpha:1.0f]
-#define kDarkThemeErrorMessageTextColor             [UIColor colorWithRed:0.749f green:0.749f blue:0.749f alpha:1.0f] // [UIColor colorWithRed:0.918367f green:0.48385f blue:0.423895f alpha:1.0f]
-#define kDarkThemeFinishedMessageTextColor          [UIColor colorWithRed:0.749f green:0.749f blue:0.749f alpha:1.0f] // [UIColor colorWithRed:0.681767f green:0.918367f blue:0.726814f alpha:1.0f]
+#define kDarkThemeTextColor							[UIColor colorWithRed:1.f green:1.f blue:1.f alpha:1.f]//[UIColor colorWithRed:0.749f green:0.749f blue:0.749f alpha:1.0f]
+#define kDarkThemeErrorMessageTextColor             [UIColor colorWithRed:1.f green:1.f blue:1.f alpha:1.0f] // [UIColor colorWithRed:0.918367f green:0.48385f blue:0.423895f alpha:1.0f]
+#define kDarkThemeFinishedMessageTextColor          [UIColor colorWithRed:1.f green:1.f blue:1.f alpha:1.0f] // [UIColor colorWithRed:0.681767f green:0.918367f blue:0.726814f alpha:1.0f]
 #define kDarkThemeActivityIndicatorViewStyle		UIActivityIndicatorViewStyleWhite
 #define kDarkThemeDetailViewBackgroundColor			[UIColor colorWithRed:0.3f green:0.3f blue:0.3f alpha:1.0f]
 #define kDarkThemeDetailViewBorderColor				[UIColor whiteColor]
@@ -91,7 +95,7 @@ MAX([UIApplication sharedApplication].statusBarFrame.size.width, [UIApplication 
 ///////////////////////////////////////////////////////
 
 #define kProgressViewAlpha                          0.4f
-#define kProgressViewBackgroundColor                [UIColor colorWithRed:0.0f green:0.0f blue:0.0f alpha:1.0f]
+#define kProgressViewBackgroundColor                [UIColor colorWithWhite:195.f/256.f alpha:1.f]
 
 
 ///////////////////////////////////////////////////////
@@ -129,7 +133,8 @@ MAX([UIApplication sharedApplication].statusBarFrame.size.width, [UIApplication 
 #define kFinishedFontSize	22.f
 
 // Text that is displayed when an error occured
-#define kErrorText			@"✗"
+//#define kErrorText			@"×"
+#define kErrorText			@""
 #define kErrorFontSize		19.f
 
 
@@ -175,6 +180,9 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 @property (unsafe_unretained, nonatomic, readonly) UILabel *visibleStatusLabel;
 @property (nonatomic, strong) UIImageView *progressView;
 @property (nonatomic, assign) CGRect oldBackgroundViewFrame;
+
+@property (nonatomic, strong) UIButton *closeButton;
+@property (nonatomic, strong) UIImageView *underlineImageView;
 // overwrite property for read-write-access
 @property (assign, getter=isHideInProgress) BOOL hideInProgress;
 @property (assign, getter=isActive) BOOL active;
@@ -201,7 +209,7 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 - (void)contentViewSwipedDown:(UIGestureRecognizer *)gestureRecognizer;
 
 // updates the current status bar background image for the given style and current size
-- (void)setStatusBarBackgroundForStyle:(UIStatusBarStyle)style;
+- (void)setStatusBarBackgroundForStyle:(UIStatusBarStyle)style messageType:(MTMessageType)messageType;
 // updates the text-colors of the labels for the given style and message type
 - (void)setColorSchemeForStatusBarStyle:(UIStatusBarStyle)style messageType:(MTMessageType)messageType;
 // updates the visiblity of the activity indicator and finished-label depending on the type
@@ -272,6 +280,10 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 @synthesize forcedToHide = forcedToHide_;
 @synthesize lastPostedMessage = lastPostedMessage_;
 
+@synthesize closeButton = closeButton_;
+@synthesize underlineImageView=_underlineImageView;
+
+@synthesize noUnderLineView = _noUnderLineView; //是否需要下滑线
 ////////////////////////////////////////////////////////////////////////
 #pragma mark -
 #pragma mark Lifecycle
@@ -289,7 +301,7 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 		}
         
 		// Place the window on the correct level and position
-        self.windowLevel = UIWindowLevelStatusBar+1.f;
+        self.windowLevel = UIWindowLevelStatusBar+2.f;
         self.frame = statusBarFrame;
 		self.alpha = 0.f;
 		self.hidden = NO;
@@ -392,11 +404,7 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 		finishedLabel_.backgroundColor = [UIColor clearColor];
 		finishedLabel_.hidden = YES;
 		finishedLabel_.text = kFinishedText;
-#ifdef __IPHONE_6_0
 		finishedLabel_.textAlignment = NSTextAlignmentCenter;
-#else
-		finishedLabel_.textAlignment = UITextAlignmentCenter;
-#endif
 		finishedLabel_.font = [UIFont fontWithName:@"HelveticaNeue-Bold" size:kFinishedFontSize];
         finishedLabel_.adjustsFontSizeToFitWidth = YES;
 		[self addSubviewToBackgroundView:finishedLabel_];
@@ -406,14 +414,9 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 		statusLabel1_.backgroundColor = [UIColor clearColor];
 		statusLabel1_.shadowOffset = CGSizeMake(0.f, 1.f);
 		statusLabel1_.font = [UIFont boldSystemFontOfSize:kStatusLabelSize];
-		statusLabel1_.numberOfLines = 1;
-#ifdef __IPHONE_6_0
 		statusLabel1_.textAlignment = NSTextAlignmentCenter;
+		statusLabel1_.numberOfLines = 1;
 		statusLabel1_.lineBreakMode = NSLineBreakByTruncatingTail;
-#else
-		statusLabel1_.textAlignment = UITextAlignmentCenter;
-		statusLabel1_.lineBreakMode = UILineBreakModeTailTruncation;
-#endif
 		statusLabel1_.autoresizingMask = UIViewAutoresizingFlexibleWidth;
 		[self addSubviewToBackgroundView:statusLabel1_];
         
@@ -422,19 +425,33 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 		statusLabel2_.shadowOffset = CGSizeMake(0.f, 1.f);
 		statusLabel2_.backgroundColor = [UIColor clearColor];
 		statusLabel2_.font = [UIFont boldSystemFontOfSize:kStatusLabelSize];
-		statusLabel2_.numberOfLines = 1;
-#ifdef __IPHONE_6_0
 		statusLabel2_.textAlignment = NSTextAlignmentCenter;
+		statusLabel2_.numberOfLines = 1;
 		statusLabel2_.lineBreakMode = NSLineBreakByTruncatingTail;
-#else
-		statusLabel2_.textAlignment = UITextAlignmentCenter;
-		statusLabel2_.lineBreakMode = UILineBreakModeTailTruncation;
-#endif
 		statusLabel2_.autoresizingMask = UIViewAutoresizingFlexibleWidth;
 		[self addSubviewToBackgroundView:statusLabel2_];
         
 		// the hidden status label at the beginning
 		hiddenStatusLabel_ = statusLabel2_;
+        
+        
+        // when error ,show  close btn
+        closeButton_ = [[UIButton alloc] init];
+        closeButton_.hidden = YES;
+        [closeButton_ setFrame:CGRectMake(kScreenWidth-30, 2, 15, 15)];
+        [closeButton_ setBackgroundImage:[UIImage imageNamed:IMG_STATUSBAR_CLOSE] forState:UIControlStateNormal];
+        //[buttonClose addTarget:self action:@selector(closeButtonClicked:) forControlEvents:UIControlEventTouchUpInside];
+                
+        
+        [self addSubviewToBackgroundView:closeButton_];
+        
+        
+        _underlineImageView = [[UIImageView alloc] init];
+        [_underlineImageView setFrame:CGRectMake(statusLabel1_.frame.size.width/2+38, 16, 35, 1)];   
+        _underlineImageView.backgroundColor = [UIColor whiteColor];
+        _underlineImageView.hidden = YES;
+        [self addSubviewToBackgroundView:_underlineImageView];
+        
         
         progress_ = 1.0;
         progressView_ = [[UIImageView alloc] initWithFrame:statusBarBackgroundImageView_.frame];
@@ -472,15 +489,6 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 	[[NSNotificationCenter defaultCenter] removeObserver:self];
     
 	delegate_ = nil;
-}
-
-////////////////////////////////////////////////////////////////////////
-#pragma mark -
-#pragma mark UIWindow
-////////////////////////////////////////////////////////////////////////
-
-- (UIViewController *)rootViewController {
-    return [UIApplication sharedApplication].delegate.window.rootViewController;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -697,7 +705,7 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
     
 	// update UI depending on current status bar style
 	UIStatusBarStyle statusBarStyle = [UIApplication sharedApplication].statusBarStyle;
-	[self setStatusBarBackgroundForStyle:statusBarStyle];
+	[self setStatusBarBackgroundForStyle:statusBarStyle messageType:messageType];
 	[self setColorSchemeForStatusBarStyle:statusBarStyle messageType:messageType];
 	[self updateUIForMessageType:messageType duration:duration];
     
@@ -796,6 +804,8 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 	[self.activityIndicator stopAnimating];
 	self.statusLabel1.text = @"";
 	self.statusLabel2.text = @"";
+    
+    self.underlineImageView.hidden = YES;
     
 	self.hideInProgress = NO;
 	// cancel previous hide- and clear requests
@@ -1014,7 +1024,7 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 						 }
                          
 						 // update status bar background
-						 [self setStatusBarBackgroundForStyle:[UIApplication sharedApplication].statusBarStyle];
+						 [self setStatusBarBackgroundForStyle:[UIApplication sharedApplication].statusBarStyle messageType:MTMessageTypeFinish];
 					 }];
 }
 
@@ -1115,6 +1125,33 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 
 - (void)contentViewClicked:(UIGestureRecognizer *)gestureRecognizer {
 	if (gestureRecognizer.state == UIGestureRecognizerStateEnded) {
+        CGPoint locationTouch = [gestureRecognizer locationInView:self.backgroundView];
+        //NSLog(@"%g",locationTouch.x);
+        //NSLog(@"%g",locationTouch.y);
+        
+        
+               
+        //NSLog(@"%@", [gestureRecognizer.view isKindOfClass:[UIButton class]] ?@"YES":@"NO");
+        
+        if(!self.closeButton.hidden){
+            if(locationTouch.x>=280.f){
+                //
+                // hide after duration
+                [self performSelector:@selector(hide) withObject:nil afterDelay:0.1];
+                // clear history after duration
+                [self performSelector:@selector(clearHistory) withObject:nil afterDelay:0.1];
+                return;
+            }else{                
+                // hide after duration
+                [self performSelector:@selector(hide) withObject:nil afterDelay:0.1];
+                // clear history after duration
+                [self performSelector:@selector(clearHistory) withObject:nil afterDelay:0.1];
+                //to tab 4
+                //[LDPostViewController retryFailPost];
+                return;
+            }            
+        }        
+        
         // if we are currently in a special state, restore to normal
         // and ignore current set animation in that case
         if (self.shrinked) {
@@ -1185,10 +1222,10 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 #pragma mark Private Methods
 ////////////////////////////////////////////////////////////////////////
 
-- (void)setStatusBarBackgroundForStyle:(UIStatusBarStyle)style {
+- (void)setStatusBarBackgroundForStyle:(UIStatusBarStyle)style  messageType:(MTMessageType)messageType{
 	// gray status bar?
 	// on iPad the Default Status Bar Style is black too
-	if (style == UIStatusBarStyleDefault && !IsIPad && !IsIPhoneEmulationMode) {
+	if (style == UIStatusBarStyleDefault && !IsIPad && !IsIPhoneEmulationMode && ![Util isIOS7]) {
 		// choose image depending on size
 		if (self.shrinked) {
 			self.statusBarBackgroundImageView.image = [self.defaultStatusBarImageShrinked stretchableImageWithLeftCapWidth:2.0f topCapHeight:0.0f];
@@ -1199,15 +1236,23 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 	}
 	// black status bar? -> no image
 	else {
-		self.statusBarBackgroundImageView.image = nil;
-		statusBarBackgroundImageView_.backgroundColor = [UIColor blackColor];
+		self.statusBarBackgroundImageView.image = nil;        
+        switch (messageType) {
+            case MTMessageTypeError:
+                statusBarBackgroundImageView_.backgroundColor = kStatusBarBackgroundImageViewBackgroundColor;
+                break;                
+            default:
+                statusBarBackgroundImageView_.backgroundColor = [UIColor blackColor];
+                break;
+        }
+		
 	}
 }
 
 - (void)setColorSchemeForStatusBarStyle:(UIStatusBarStyle)style messageType:(MTMessageType)messageType {
 	// gray status bar?
 	// on iPad the Default Status Bar Style is black too
-	if (style == UIStatusBarStyleDefault && !IsIPad && !IsIPhoneEmulationMode) {
+	if (style == UIStatusBarStyleDefault && !IsIPad && !IsIPhoneEmulationMode && ![Util isIOS7]) {
 		// set color of labels depending on messageType
         switch(messageType) {
             case MTMessageTypeFinish:
@@ -1253,19 +1298,19 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 		// set color of labels depending on messageType
         switch(messageType) {
             case MTMessageTypeFinish:
-                self.statusLabel1.textColor = self.customTextColor ? self.customTextColor: kDarkThemeFinishedMessageTextColor;
-                self.statusLabel2.textColor = self.customTextColor ? self.customTextColor: kDarkThemeFinishedMessageTextColor;
-                self.finishedLabel.textColor = self.customTextColor ? self.customTextColor: kDarkThemeFinishedMessageTextColor;
+                self.statusLabel1.textColor = kDarkThemeFinishedMessageTextColor;
+                self.statusLabel2.textColor = kDarkThemeFinishedMessageTextColor;
+                self.finishedLabel.textColor = kDarkThemeFinishedMessageTextColor;
                 break;
             case MTMessageTypeError:
-                self.statusLabel1.textColor = self.customTextColor ? self.customTextColor: kDarkThemeErrorMessageTextColor;
-                self.statusLabel2.textColor = self.customTextColor ? self.customTextColor: kDarkThemeErrorMessageTextColor;
-                self.finishedLabel.textColor = self.customTextColor ? self.customTextColor: kDarkThemeErrorMessageTextColor;
+                self.statusLabel1.textColor = kDarkThemeErrorMessageTextColor;
+                self.statusLabel2.textColor = kDarkThemeErrorMessageTextColor;
+                self.finishedLabel.textColor = kDarkThemeErrorMessageTextColor;
                 break;
             default:
-                self.statusLabel1.textColor = self.customTextColor ? self.customTextColor: kDarkThemeTextColor;
-                self.statusLabel2.textColor = self.customTextColor ? self.customTextColor: kDarkThemeTextColor;
-                self.finishedLabel.textColor = self.customTextColor ? self.customTextColor: kDarkThemeTextColor;
+                self.statusLabel1.textColor = kDarkThemeTextColor;
+                self.statusLabel2.textColor = kDarkThemeTextColor;
+                self.finishedLabel.textColor = kDarkThemeTextColor;
                 break;
         }
         self.statusLabel1.shadowColor = nil;
@@ -1298,6 +1343,10 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 			self.finishedLabel.hidden = YES;
 			self.activityIndicator.hidden = self.hidesActivity;
             
+            //hidden close btn
+            self.closeButton.hidden = YES;
+            self.underlineImageView.hidden = YES;
+            
 			// start activity indicator
 			if (!self.hidesActivity) {
 				[self.activityIndicator startAnimating];
@@ -1317,6 +1366,10 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 			self.finishedLabel.font = [UIFont fontWithName:@"HelveticaNeue-Bold" size:kFinishedFontSize];
 			self.finishedLabel.text = kFinishedText;
             self.progress = 1.0;
+            
+            //hidden close btn
+            self.closeButton.hidden = YES;
+            self.underlineImageView.hidden = YES;
 			break;
 		case MTMessageTypeError:
 			// will call hide after delay
@@ -1332,6 +1385,14 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 			self.finishedLabel.font = [UIFont boldSystemFontOfSize:kErrorFontSize];
 			self.finishedLabel.text = kErrorText;
             self.progress = 1.0;
+            
+            //show close btn
+            self.closeButton.hidden = self.hidesActivity;
+            if (!_noUnderLineView){
+                self.underlineImageView.hidden = self.hidesActivity;
+            } else {
+                self.underlineImageView.hidden = YES;
+            }
 			break;
 	}
     
@@ -1365,24 +1426,24 @@ kDetailViewWidth, kHistoryTableRowHeight*kMaxHistoryTableRowCount + kStatusBarHe
 
 - (void)updateProgressViewSizeForLabel:(UILabel *)label {
     if (self.progress < 1.) {
-        CGSize size = [label sizeThatFits:label.frame.size];
-        CGFloat width = size.width * (float)(1. - self.progress);
-        CGFloat x = label.center.x + size.width/2.f - width;
+        //CGSize size = [label sizeThatFits:label.frame.size];
+        //CGFloat width = size.width * (float)(1. - self.progress);
+        //CGFloat x = label.center.x + size.width/2.f - width;
         
         // if we werent able to determine a size, do nothing
-        if (size.width == 0.f) {
-            return;
-        }
+        //if (size.width == 0.f) {
+        //    return;
+        //}
         
         // progressView always covers only the visible portion of the text
         // it "shrinks" to the right with increased progress to reveal more
         // text under it
         self.progressView.hidden = NO;
-        //[UIView animateWithDuration:self.progress > 0.0 ? kUpdateProgressViewDuration : 0.0
-        //                 animations:^{
-        self.progressView.frame = CGRectMake(x, self.progressView.frame.origin.y,
-                                             self.backgroundView.frame.size.width-x, self.progressView.frame.size.height);
-        //                 }];
+        [UIView animateWithDuration:self.progress > 0.0 ? kUpdateProgressViewDuration : 0.0
+                         animations:^{
+        self.progressView.frame = CGRectMake(kScreenWidth*self.progress, self.progressView.frame.origin.y,
+                                             self.backgroundView.frame.size.width, self.progressView.frame.size.height);
+                         }];
     } else {
         self.progressView.hidden = YES;
     }
